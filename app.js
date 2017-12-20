@@ -9,7 +9,23 @@ var server = restify.createServer();
 
 var inMemoryStorage = new builder.MemoryBotStorage();
 
-//example message address
+// Create chat bot
+var connector = new builder.ChatConnector({
+    appId: setting.config.appId,
+    appPassword: setting.config.appPassword
+});
+
+// init bot instance
+var bot = new builder.UniversalBot(connector,
+    [
+        //default commond
+        function(session){
+            session.send("Invalid Keyword");            
+            session.endDialog();
+        }
+    ]
+).set('storage', inMemoryStorage);// Register in-memory storage 
+
 
 function sendProactiveMessage(address) {
     var msg = new builder.Message().address(address);
@@ -20,34 +36,6 @@ function sendProactiveMessage(address) {
   
   
 
-// Create chat bot
-var connector = new builder.ChatConnector({
-    appId: setting.config.appId,
-    appPassword: setting.config.appPassword
-});
-
-// init bot instance
-var bot = new builder.UniversalBot(connector, [
-    function (session) {
-        session.send("Welcome to the dinner reservation.");
-        builder.Prompts.time(session, "Please provide a reservation date and time (e.g.: June 6th at 5pm)");
-    },
-    function (session, results) {
-        session.dialogData.reservationDate = builder.EntityRecognizer.resolveTime([results.response]);
-        builder.Prompts.text(session, "How many people are in your party?");
-    },
-    function (session, results) {
-        session.dialogData.partySize = results.response;
-        builder.Prompts.text(session, "Who's name will this reservation be under?");
-    },
-    function (session, results) {
-        session.dialogData.reservationName = results.response;
-
-        // Process request and display reservation details
-        session.send(`Reservation confirmed. Reservation details: <br/>Date/Time: ${session.dialogData.reservationDate} <br/>Party size: ${session.dialogData.partySize} <br/>Reservation name: ${session.dialogData.reservationName}`);
-        session.endDialog();
-    }
-]).set('storage', inMemoryStorage); // Register in-memory storage 
 bot.use(builder.Middleware.dialogVersion({
     version: 1.0,
     resetCommand: /^reset/i
@@ -61,12 +49,30 @@ bot.dialog('greetings', [
     function (session, results) {
         session.endDialog(`Hello ${results.response}!`);
     }
+    
 ]);
 
 //make event on conversation update
 bot.on('conversationUpdate', function (message) {
+    // console.log(message, "the message")
     if (message.membersAdded && message.membersAdded.length > 0) {
         console.log(message.address.conversation, "this is conversation")
+        var name = message.user.name || ""
+        pgClient.client.query(pgClient.Queries.userQuery.insert,[message.user.id,name,"","",""])
+        .then(res => {
+            console.log(res.rows[0])
+            var userID = res.rows[0].user_id;
+            pgClient.client.query(pgClient.Queries.conversationQuery.insert,[message.address.conversation.id,userID,"",JSON.stringify(message.address),JSON.stringify(message.entities)])
+            .then(r => {
+                console.log("succes ", r)
+            })
+            .catch(err => {
+                console.log("fail ", err)
+            });
+          })
+          .catch(e => {
+            console.error(e.stack)
+          });
         // Say hello
         var isGroup = message.address.conversation.isGroup;
         var txt = isGroup ? "Hello everyone!" : "Hello...";
@@ -124,27 +130,70 @@ bot.on('contactRelationUpdate', function (message) {
 
 
 // Add first run dialog
-bot.dialog('firstRun', function (session) {
-    session.userData.firstRun = true;
-    session.send("Hello...").endDialog();
-}).triggerAction({
-    onFindAction: function (context, callback) {
-        // Only trigger if we've never seen user before
-        if (!context.userData.firstRun) {
-            // Return a score of 1.1 to ensure the first run dialog wins
-            callback(null, 1.1);
-        } else {
-            callback(null, 0.0);
-        }
+// bot.dialog('firstRun', function (session) {
+//     session.userData.firstRun = true;
+//     session.send("Hello...").endDialog();
+// }).triggerAction({
+//     onFindAction: function (context, callback) {
+//         // Only trigger if we've never seen user before
+//         if (!context.userData.firstRun) {
+//             // Return a score of 1.1 to ensure the first run dialog wins
+//             callback(null, 1.1);
+//         } else {
+//             callback(null, 0.0);
+//         }
+//     }
+// });
+
+
+bot.dialog("register", [
+    function (session) {
+        session.send("Welcome to CTMS notification registration ");
+        // builder.Prompts.time(session, "Please enter your name !");
+        builder.Prompts.text(session, "What is  your name ?");        
+    },
+    function (session, results) {
+        session.dialogData.workerName = results.response;        
+        // session.dialogData.reservationDate = builder.EntityRecognizer.resolveTime([results.response]);
+        // builder.Prompts.number(session, "What is your Worker ID ?");
+        builder.Prompts.text(session, "What is your Worker ID ?");
+        
+    },
+    function (session, results) {
+        session.dialogData.workerID= results.response;
+        builder.Prompts.text(session, "What is your designation ?");
+    },
+    function (session, results) {
+        session.dialogData.designation = results.response;
+        // Process request and display reservation details
+        session.send(`Registration success. registration details: <br/>Name: ${session.dialogData.workerName}
+                        <br/> Worker ID: ${session.dialogData.workerID} <br/>Designation: ${session.dialogData.designation}
+                        <br/><br/>
+                        You will receive ctms alert`);
+        pgClient.client.query(pgClient.Queries.userQuery.update,[session.message.address.user.id,session.dialogData.workerID,session.dialogData.designation,session.dialogData.workerName])
+        .then(r =>{
+            console.log("success");
+        }).catch (e =>{
+            console.log(e.stack);            
+        });
+        session.endDialog();
     }
+]).triggerAction({
+    matches: /^register$/i,
 });
 
+// bot.dialog('help', function (session, args, next) {
+//     session.endDialog("This is a bot that can help you make a dinner reservation. <br/>Please say 'next' to continue");
+// })
+// .triggerAction({
+//     matches: /^help$/i,
+// });
 server.post('/', connector.listen());
 server.post('/api/messages', connector.listen());
 
 //start server
 server.listen(process.env.PORT || 3000, function () {
-    pgClient.client.connect();
+    pgClient.client.connect();  
     console.log('%s listening to %s', server.name, server.url);
 });
 
