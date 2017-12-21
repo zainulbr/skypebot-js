@@ -2,11 +2,12 @@
 var restify = require('restify');
 var builder = require('botbuilder');
 var pgClient = require('./pgClient');
-var setting  = require('./config')
+var setting  = require('./config');
+
 // Setup Restify Server
 var server = restify.createServer();
-// setup presistent memory
 
+// setup presistent memory
 var inMemoryStorage = new builder.MemoryBotStorage();
 
 // Create chat bot
@@ -29,7 +30,7 @@ var bot = new builder.UniversalBot(connector,
 
 function sendProactiveMessage(address) {
     var msg = new builder.Message().address(address);
-    msg.text('Hello, this is a notification, love u all');
+    msg.text('Hello, this is a notification, Take care of your health please ');
     msg.textLocale('en-US');
     bot.send(msg);
   }
@@ -57,25 +58,9 @@ bot.on('conversationUpdate', function (message) {
     // console.log(message, "the message")
     if (message.membersAdded && message.membersAdded.length > 0) {
         console.log(message.address.conversation, "this is conversation")
-        var name = message.user.name || ""
-        pgClient.client.query(pgClient.Queries.userQuery.insert,[message.user.id,name,"","",""])
-        .then(res => {
-            console.log(res.rows[0])
-            var userID = res.rows[0].user_id;
-            pgClient.client.query(pgClient.Queries.conversationQuery.insert,[message.address.conversation.id,userID,"",JSON.stringify(message.address),JSON.stringify(message.entities)])
-            .then(r => {
-                console.log("succes ", r)
-            })
-            .catch(err => {
-                console.log("fail ", err)
-            });
-          })
-          .catch(e => {
-            console.error(e.stack)
-          });
-        // Say hello
+        var name = message.user.name || "";
         var isGroup = message.address.conversation.isGroup;
-        var txt = isGroup ? "Hello everyone!" : "Hello...";
+        var txt = isGroup ? "Hello everyone!" : "Hello... " + name;
         var reply = new builder.Message()
             .address(message.address)
             .text(txt);
@@ -106,9 +91,34 @@ bot.on('contactRelationUpdate', function (message) {
             .address(message.address)
             .text("Hello %s... Thanks for adding me.", name || 'there');
         bot.send(reply);
+      
+    }
+});
 
+bot.dialog("/register", [
+    function (session) {
 
-        pgClient.client.query(pgClient.Queries.userQuery.insert,[message.user.id,name,"","",""])
+        session.send("Welcome to CTMS notification registration ");
+        builder.Prompts.text(session, "What is  your name ?");        
+    },
+    function (session, results) {
+        session.dialogData.workerName = results.response;        
+        builder.Prompts.text(session, "What is your Worker ID ?");
+        
+    },
+    function (session, results) {
+        session.dialogData.workerID = results.response;
+        builder.Prompts.text(session, "What is your Email/skype ID ?");
+    },
+    function (session, results) {
+        session.dialogData.email = results.response;
+        session.send(`Registration success. registration details: <br/>Name: ${session.dialogData.workerName}
+                        <br/> Worker ID: ${session.dialogData.workerID} <br/>Email/skype ID : ${session.dialogData.email}
+                        <br/><br/>
+                        You will receive ctms alert`);
+        var message = session.message;
+        var data = session.dialogData;
+        pgClient.client.query(pgClient.Queries.userQuery.insert,[message.user.id,data.workerName,data.workerID,"",data.email])
         .then(res => {
             console.log(res.rows[0])
             var userID = res.rows[0].user_id;
@@ -119,62 +129,9 @@ bot.on('contactRelationUpdate', function (message) {
             .catch(err => {
                 console.log("fail ", err)
             });
-          })
-          .catch(e => {
+        })
+        .catch(e => {
             console.error(e.stack)
-          });
-      
-    }
-});
-
-
-
-// Add first run dialog
-// bot.dialog('firstRun', function (session) {
-//     session.userData.firstRun = true;
-//     session.send("Hello...").endDialog();
-// }).triggerAction({
-//     onFindAction: function (context, callback) {
-//         // Only trigger if we've never seen user before
-//         if (!context.userData.firstRun) {
-//             // Return a score of 1.1 to ensure the first run dialog wins
-//             callback(null, 1.1);
-//         } else {
-//             callback(null, 0.0);
-//         }
-//     }
-// });
-
-
-bot.dialog("register", [
-    function (session) {
-        session.send("Welcome to CTMS notification registration ");
-        // builder.Prompts.time(session, "Please enter your name !");
-        builder.Prompts.text(session, "What is  your name ?");        
-    },
-    function (session, results) {
-        session.dialogData.workerName = results.response;        
-        // session.dialogData.reservationDate = builder.EntityRecognizer.resolveTime([results.response]);
-        // builder.Prompts.number(session, "What is your Worker ID ?");
-        builder.Prompts.text(session, "What is your Worker ID ?");
-        
-    },
-    function (session, results) {
-        session.dialogData.workerID= results.response;
-        builder.Prompts.text(session, "What is your designation ?");
-    },
-    function (session, results) {
-        session.dialogData.designation = results.response;
-        // Process request and display reservation details
-        session.send(`Registration success. registration details: <br/>Name: ${session.dialogData.workerName}
-                        <br/> Worker ID: ${session.dialogData.workerID} <br/>Designation: ${session.dialogData.designation}
-                        <br/><br/>
-                        You will receive ctms alert`);
-        pgClient.client.query(pgClient.Queries.userQuery.update,[session.message.address.user.id,session.dialogData.workerID,session.dialogData.designation,session.dialogData.workerName])
-        .then(r =>{
-            console.log("success");
-        }).catch (e =>{
-            console.log(e.stack);            
         });
         session.endDialog();
     }
@@ -182,12 +139,7 @@ bot.dialog("register", [
     matches: /^register$/i,
 });
 
-// bot.dialog('help', function (session, args, next) {
-//     session.endDialog("This is a bot that can help you make a dinner reservation. <br/>Please say 'next' to continue");
-// })
-// .triggerAction({
-//     matches: /^help$/i,
-// });
+
 server.post('/', connector.listen());
 server.post('/api/messages', connector.listen());
 
