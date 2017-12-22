@@ -13,7 +13,8 @@
     "mongodb": "^3.0.0-rc0",
     "mongodb-core": "^3.0.0-rc0",
     "napajs": "^0.1.7",
+    "node-restify-validation": "^1.1.1",
     "pg": "^7.4.0",
-    "restify": "^6.3.2"
+    "restify": "^6.3.4"
   }
 }

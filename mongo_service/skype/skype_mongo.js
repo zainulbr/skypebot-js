@@ -1,78 +1,101 @@
 var collectionName = 'skype'
-const insertDocuments = function (db, callback, data, query) {
+var assert = require('assert');
+
+function insertDocuments(db, callback, data) {
+  if (!data || typeof data === "undefined") {
+    console.log("data must not null")
+    return;
+  }
   // Get the documents collection
   const collection = db.collection(collectionName);
   // Insert some documents
-  collection.insertMany([{
-    a: 1
-  }, {
-    a: 2
-  }, {
-    a: 3
-  }], function (err, result) {
+  collection.insertMany(data ||[],
+    // [{
+  //   a: 1
+  // }, {
+  //   a: 2
+  // }, {
+  //   a: 3
+  // }]
+  function (err, result) {
     assert.equal(err, null);
-    assert.equal(3, result.result.n);
-    assert.equal(3, result.ops.length);
+    assert.equal(data.length, result.result.n);
+    assert.equal(data.length, result.ops.length);
     callback(result);
   });
 }
 
-const findDocuments = function(db, callback, data, query) {
+function findDocuments(db, callback, query) {
   // Get the documents collection
   const collection = db.collection(collectionName);
   // Find some documents
-  collection.find({}).toArray(function(err, docs) {
+  collection.find(
+    query||{}
+  ).toArray(function(err, docs){
     assert.equal(err, null);
     console.log("Found the following records");
-    console.log(docs)
     callback(docs);
   });
 }
 
-const findDocumentsQuery = function(db, callback, data, query) {
-  // Get the documents collection
-  const collection = db.collection(collectionName);
-  // Find some documents
-  collection.find({'a': 3}).toArray(function(err, docs) {
-    assert.equal(err, null);
-    console.log("Found the following records");
-    console.log(docs);
-    callback(docs);
-  });
-}
-
-const updateDocument = function(db, callback, data, query) {
+function updateDocument(db, callback, query,data) {
+  if (!query || typeof query !== "undefined") {
+    console.log("query must not null")
+    return;
+  }
   // Get the documents collection
   const collection = db.collection(collectionName);
   // Update document where a is 2, set b equal to 1
-  collection.updateOne({ a : 2 }
-    , { $set: { b : 1 } }, function(err, result) {
+  collection.updateOne(query ||{},{$set :data||{}},
+  // {   a: 2 // where
+  // }, {
+  //   $set: {
+  //     b: 1 //set
+  //   }},
+  function (err, result) {
     assert.equal(err, null);
-    assert.equal(1, result.result.n);
-    console.log("Updated the document with the field a equal to 2");
+    assert.equal(data.length, result.result.n);
+    console.log("Updated the document");
     callback(result);
-  });  
+  });
 }
 
-const removeDocument = function(db, callback, data, query) {
+function removeDocument(db, callback, query) {
+  if (!query || typeof query !== "undefined") {
+    console.log("query must not null")
+    return;
+  }
   // Get the documents collection
   const collection = db.collection(collectionName);
   // Delete document where a is 3
-  collection.deleteOne({ a : 3 }, function(err, result) {
+  collection.deleteOne(
+    // {a: 3}
+    query || {},
+    function (err, result) {
     assert.equal(err, null);
-    assert.equal(1, result.result.n);
-    console.log("Removed the document with the field a equal to 3");
+    assert.equal(query.length, result.result.n);
+    console.log("Removed the document");
     callback(result);
-  });    
+  });
 }
 
-const indexCollection = function(db, callback) {
-  db.collection(collectionName).createIndex(
-    { "a": 1 },
-      null,
-      function(err, results) {
-        console.log(results);
-        callback();
+function indexCollection(db, callback, data) {
+  db.collection(collectionName).createIndex(data||{},
+      // "a": 1
+      // example,
+    null,
+    function (err, results) {
+      console.log(results);
+      callback();
     }
   );
 };
+
+
+module.exports = {
+  find: findDocuments,
+  insert : insertDocuments,
+  setIndex : indexCollection,
+  update : updateDocument,
+  delete : removeDocument,
+}

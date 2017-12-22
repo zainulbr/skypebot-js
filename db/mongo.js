@@ -1,4 +1,6 @@
+var mongodb = require('mongodb');
 var MongoClient = require('mongodb').MongoClient;
+var database;
 
 var assert = require('assert');
 // Connection URL
@@ -6,24 +8,37 @@ const url = 'mongodb://localhost:27017';
 // Database Name
 const dbName = 'ctms';
 
+function Connect(callback) {
+  // Initialize connection once
+  MongoClient.connect(url, (err, client) => { 
+    if (err) throw err;
+    database = client.db(dbName);
+    console.log("database connect success");
+    callback(database);
+    // Start the application after the database connection is ready
+  });
+
+}
+// Reuse database object in request handlers
+// app.get("/", function (req, res) {
+//   db.collection("replicaset_mongo_client_collection").find({}, function (err, docs) {
+//     docs.each(function (err, doc) {
+//       if (doc) {
+//         console.log(doc);
+//       } else {
+//         res.end();
+//       }
+//     });
+//   });
+// });
+
 
 module.exports = {
-  client : MongoClient,
-  url : url,
-  db : dbName 
+  client: MongoClient,
+  mongodb:mongodb,
+  con: Connect,
+  db: database,
 }
-
-
-// Initialize connection once
-MongoClient.connect("mongodb://localhost:27017/integration_test", function(err, database) {
-  if(err) throw err;
-
-  db = database;
-
-  // Start the application after the database connection is ready
-  app.listen(3000);
-  console.log("Listening on port 3000");
-});
 
 
 // var DBclient = "data";

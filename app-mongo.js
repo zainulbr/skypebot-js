@@ -1,6 +1,8 @@
-
 // Add your requirements
 var assert = require('assert');
+var mgo = require('./db/mongo');
+var skypeSvc = require('./mongo_service/skype/skype_mongo')
+var restifyValidation = require('node-restify-validation')
 var restify = require('restify');
 var builder = require('botbuilder');
 var pgClient = require('./pgClient');
@@ -12,6 +14,16 @@ var zone1 = napa.zone.create('zone1', {
 
 // Setup Restify Server
 var server = restify.createServer();
+server.use(restify.plugins.bodyParser());
+server.use(restify.plugins.queryParser());
+server.use(restifyValidation.validationPlugin({
+  // Shows errors as an array
+  errorsAsArray: false,
+  // Not exclude incoming variables not specified in validator rules
+  forbidUndefinedVariables: false,
+  // errorHandler: restify.errors.InvalidArgumentError,
+}));
+
 // setup presistent memory
 var inMemoryStorage = new builder.MemoryBotStorage();
 // Create chat bot
@@ -23,6 +35,7 @@ var connector = new builder.ChatConnector({
 var bot = new builder.UniversalBot(connector, [
   //default commond
   function (session) {
+    console.log("invalid keyword")
     session.send("Invalid Keyword");
     session.endDialog();
   }
@@ -99,7 +112,16 @@ bot.on('contactRelationUpdate', function (message) {
 bot.dialog("/register", [
   function (session) {
     session.send("Welcome to CTMS notification registration ");
-    builder.Prompts.text(session, "What is  your name ?");
+    skypeSvc.find(mgo.db, (data) => {
+      if (data && data.length != 0) {
+        session.send("Sorry, you are already registered. Contaact admin for more information");
+        session.endDialog();
+        return
+      }
+      builder.Prompts.text(session, "What is  your name ?");
+    }, {
+      skype_id: session.message.user.id
+    })
   },
   function (session, results) {
     session.dialogData.workerName = results.response;
@@ -111,70 +133,118 @@ bot.dialog("/register", [
   },
   function (session, results) {
     session.dialogData.email = results.response;
-    session.send(`Registration success. registration details: <br/>Name: ${session.dialogData.workerName}
-                    <br/> Worker ID: ${session.dialogData.workerID} <br/>Email/skype ID : ${session.dialogData.email}
+    builder.Prompts.number(session, "What is your Phone number ?");
+  },
+  function (session, results) {
+    session.dialogData.phoneNumber = results.response;
+    var data = session.dialogData;
+    var message = session.message;
+
+    session.send(`Registration success. registration details: <br/>Name: ${data.workerName}
+                    <br/>Worker ID: ${data.workerID}<br/>Email/skype ID : ${data.email}<br/>Phone Number : ${data.phoneNumber}
                     <br/><br/>
                     You will receive ctms alert`);
-    var message = session.message;
-    var data = session.dialogData;
-    pgClient.client.query(pgClient.Queries.userQuery.insert, [message.user.id, data.workerName, data.workerID, "", data.email])
-      .then(res => {
-        console.log(res.rows[0])
-        var userID = res.rows[0].user_id;
-        pgClient.client.query(pgClient.Queries.conversationQuery.insert, [message.address.conversation.id, userID, "", JSON.stringify(message.address), JSON.stringify(message.entities)])
-          .then(r => {
-            console.log("succes ", r)
-          })
-          .catch(err => {
-            console.log("fail ", err)
-          });
-      })
-      .catch(e => {
-        console.error(e.stack)
-      });
+
+    var newSkypeUser = [{
+      skype_id: message.user.id,
+      skype_name: data.workerName,
+      email: data.email,
+      phone_number: data.phoneNumber,
+      conversation_address: message.address,
+      conversation_entitas: message.entities,
+      worker_id: data.workerID,
+      created: new Date(Date.now()).toISOString(),
+    }];
+
+    skypeSvc.insert(mgo.db, (result) => {
+      console.log(result)
+    }, newSkypeUser);
+
     session.endDialog();
   }
 ]).triggerAction({
   matches: /^register$/i,
 });
 
-
-function boardCastMessage() {
-  pgClient.client.query(pgClient.Queries.conversationQuery.getAll)
-    .then(res => {
-      if (res.rows) {
-        res.rows.forEach(r => {
-          var name = r.conversation_address.user.name || "no_name";
-          sendProactiveMessage(r.conversation_address, name);
-          console.log(r.conversation_id)
-        });
-      }
-    })
-    .catch(e => {
-      console.error(e.stack)
-    });
-}
-
 zone1.execute(
-  (r) => r, [])
-.then(() => {
-  server.post('/', connector.listen())
-});
-
-zone1.execute(
-  (r) => r, [])
-.then(() => {
-  server.post('/api/messages', connector.listen())
-});
+    (r) => r, [])
+  .then(() => {
+    server.post('/', connector.listen())
+  });
 
 zone1.execute(
     (r) => r, [])
   .then(() => {
-    server.listen(process.env.PORT || 3000, function () {
-      pgClient.client.connect();
-      console.log('%s listening to %s', server.name, server.url);
-    })
-  }).catch(e => {
-    console.error(e.stack)
+    server.post('/api/messages', connector.listen())
   });
-  
+
+
+server.post({
+  url: '/api/v1/skype/getuser',
+  validation: {}
+}, (req, res, next) => {
+  if (!req.body || req.body.length == 0) {
+    res.status(400);
+    res.send();
+    res.end;
+    return;
+  }
+
+  console.log(req.body)
+  skypeSvc.find(mgo.db, (data) => {
+    res.status(200)
+    res.send(data);
+    res.end;
+  });
+})
+
+server.post({
+  url: '/api/v1/skype/sendNotification',
+  validation: {
+    content: {
+      key_id: {
+        isRequired: true
+      },
+    }
+  }
+}, (req, res, next) => {
+  var query = {
+    $or: [{
+      skype_id: req.body.key_id
+    }, {
+      phone_number: parseFloat(req.body.key_id)
+    }]
+  };
+  skypeSvc.find(mgo.db, (data) => {
+    res.status(200)
+    if (data) {
+      console.log(data)
+      data.forEach(r => {
+        if (r.conversation_address) {
+          var name = r.conversation_address.user.name || "no_name";
+          sendProactiveMessage(r.conversation_address, name);
+          console.log(r.conversation_id)
+        } else {
+          console.log("data is null")
+        }
+      });
+    }
+    res.send("notificatoin sended");
+    res.end;
+  }, query);
+});
+
+
+function run(db) {
+  zone1.execute(
+      (r) => r, [])
+    .then(() => {
+      server.listen(process.env.PORT || 3000, () => {
+        console.log('%s listening to %s', server.name, server.url);
+        mgo.db = db
+      })
+    });
+}
+
+
+mgo.con(run);
